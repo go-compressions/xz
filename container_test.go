@@ -231,8 +231,8 @@ func TestBlockHeaderErrors(t *testing.T) {
 		}()), xz.ErrUnsupported},
 		{"zero compressed size", blockHeader(&zero, &u, lzma2(0)), xz.ErrCorrupt},
 		{"unknown filter", blockHeader(&c, &u, filterSpec{0x1234, nil}, lzma2(0)), xz.ErrUnsupported},
-		{"last filter not LZMA2", blockHeader(&c, &u, lzma2(0), filterSpec{0x04, nil}), xz.ErrCorrupt},
-		{"LZMA2 not last", blockHeader(&c, &u, lzma2(0), lzma2(0)), xz.ErrCorrupt},
+		{"last filter not LZMA2", blockHeader(&c, &u, lzma2(0), filterSpec{0x04, nil}), xz.ErrUnsupported},
+		{"LZMA2 not last", blockHeader(&c, &u, lzma2(0), lzma2(0)), xz.ErrUnsupported},
 		{"LZMA2 props length", blockHeader(&c, &u, filterSpec{0x21, []byte{0, 0}}), xz.ErrCorrupt},
 		{"LZMA2 no props", blockHeader(&c, &u, filterSpec{0x21, nil}), xz.ErrCorrupt},
 		{"LZMA2 dictionary property 41", blockHeader(&c, &u, lzma2(41)), xz.ErrCorrupt},
@@ -251,7 +251,7 @@ func TestBlockHeaderErrors(t *testing.T) {
 			h := blockHeader(&c, &u, lzma2(0))
 			h[len(h)-5] = 1
 			return refix(h)
-		}(), xz.ErrCorrupt},
+		}(), xz.ErrUnsupported},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { wantErr(t, mk(tc.h), xz.ReaderConfig{}, tc.want) })

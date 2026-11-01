@@ -1,0 +1,158 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The library packages whose statements the coverage gate counts. Tests of
+  # one package may cover another (the xz package exercises the filters and
+  # the LZMA core through real files), so coverage is measured across them.
+  COVERPKG: github.com/go-compressions/xz,github.com/go-compressions/xz/lzma,github.com/go-compressions/xz/internal/lzmacore,github.com/go-compressions/xz/internal/filter,github.com/go-compressions/xz/internal/xerr
+
+jobs:
+  # Native runners: amd64 and arm64. Full vet + race + 100% coverage gate.
+  native:
+    name: native (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, arch: amd64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: go vet ./...
+      - run: go build ./...
+      - run: CGO_ENABLED=0 go build ./...
+      - run: go test -race -v ./...
+      - name: coverage gate (100%)
+        run: |
+          go test -covermode=atomic -coverpkg=$COVERPKG -coverprofile=cov.out ./...
+          go run ./internal/covgaps cov.out | tee gaps.txt
+          grep -q '^coverage: 100.0%' gaps.txt || { echo "coverage below 100%"; exit 1; }
+
+  # Bomb tests assert a refusal or a tiny allocation. They run as a compiled
+  # binary under GOMEMLIMIT and a virtual memory limit, so that a regression
+  # fails by itself instead of allocating gigabytes of the runner.
+  bombs:
+    name: bombs (ulimit -v, GOMEMLIMIT)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: go test -c -o xz.test .
+      - run: go test -c -o lzma.test ./lzma
+      - run: go test -c -o core.test ./internal/lzmacore
+      - name: run under limits
+        run: |
+          ulimit -v 2097152
+          GOMEMLIMIT=256MiB ./xz.test -test.run 'Bomb|Ceiling' -test.v
+          GOMEMLIMIT=256MiB ./lzma.test -test.run 'Huge|Header|Ceiling|Dictionary' -test.v
+          GOMEMLIMIT=256MiB ./core.test -test.run 'Memory|Ceiling|Literal' -test.v
+
+  # 32-bit: int is 32 bits, so every size computation that touches a header
+  # field is exercised (declared dictionaries go up to 4 GiB - 1).
+  i386:
+    name: linux/386
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: GOARCH=386 go vet ./...
+      - run: GOARCH=386 go test ./...
+
+  # Windows. A platform difference hides in buffer sizing and in anything
+  # that assumed a separator or a page size; the suite runs CGO-free, which is
+  # the library's own contract.
+  windows:
+    name: windows (amd64)
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+      - name: coverage gate (100%)
+        shell: bash
+        run: |
+          go test -covermode=atomic -coverpkg=$COVERPKG -coverprofile=cov.out ./...
+          go run ./internal/covgaps cov.out | tee gaps.txt
+          grep -q '^coverage: 100.0%' gaps.txt || { echo "coverage below 100%"; exit 1; }
+
+  vulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  # Cross-compiled test binaries run under QEMU, away from the source tree
+  # (the fixtures are embedded, the fuzz crashers are named unit tests). It
+  # covers the four remaining 64-bit Go targets; s390x is BIG-ENDIAN, which
+  # exercises the byte- and bit-level code on the opposite endianness. Every
+  # package's test binary writes coverage data into one directory, merged
+  # and gated at 100% like the native lanes.
+  emulated:
+    name: emulated (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: riscv64, image: "debian:trixie", qemu: "rv64,v=true,vlen=128" }
+          - { arch: loong64, image: "ghcr.io/loong64/debian:trixie", qemu: "la464" }
+          - { arch: ppc64le, image: "debian:trixie", qemu: "power9" }
+          - { arch: s390x,   image: "debian:trixie", qemu: "qemu" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: docker run --privileged --rm tonistiigi/binfmt --install all
+      - name: cross-compile test binaries
+        run: |
+          mkdir -p /tmp/t/cov
+          for p in . ./lzma ./internal/lzmacore ./internal/filter ./internal/xerr; do
+            n=$(echo "$p" | tr -c 'a-z0-9\n' '_')
+            CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go test -c -cover -coverpkg=$COVERPKG -o /tmp/t/$n.test $p
+          done
+      - name: run under QEMU
+        run: |
+          docker run --rm --platform linux/${{ matrix.arch }} -e QEMU_CPU=${{ matrix.qemu }} \
+            -e GOCOVERDIR=/t/cov -v /tmp/t:/t ${{ matrix.image }} \
+            sh -c 'for t in /t/*.test; do echo "== $t"; $t -test.short -test.v -test.gocoverdir=/t/cov || exit 1; done'
+      - name: coverage gate (100%)
+        run: |
+          go tool covdata textfmt -i=/tmp/t/cov -o /tmp/t/cov.txt
+          go run ./internal/covgaps /tmp/t/cov.txt | tee gaps.txt
+          grep -q '^coverage: 100.0%' gaps.txt || { echo "coverage below 100%"; exit 1; }

@@ -132,6 +132,9 @@ type Reader struct {
 	blocks    uint64
 	idxHash   hash.Hash
 
+	// the largest dictionary size any block header declared (for tests)
+	maxDeclared uint64
+
 	// current block
 	blk   block
 	l2    *lzmacore.LZMA2
@@ -314,7 +317,9 @@ func (r *Reader) startBlock(h []byte) error {
 	}
 	for _, c := range body {
 		if c != 0 {
-			return xerr.Corrupt("non-zero block header padding")
+			// A valid CRC32 with data where padding is expected may be a
+			// field of a newer format version (liblzma reports the same).
+			return xerr.Unsupported("non-zero block header padding")
 		}
 	}
 	if err := r.buildChain(specs[:nf]); err != nil {
@@ -345,12 +350,15 @@ func (r *Reader) buildChain(specs []filterSpec) error {
 		}
 	}
 	last := len(specs) - 1
+	// Chains the format does not allow are reported as unsupported, as
+	// liblzma does (xz-utils tests/files/README, unsupported-filter_flags-2
+	// and -3).
 	if specs[last].id != idLZMA2 {
-		return xerr.Corrupt("the last filter is not LZMA2")
+		return xerr.Unsupported("the last filter is not LZMA2")
 	}
 	for _, s := range specs[:last] {
 		if s.id == idLZMA2 {
-			return xerr.Corrupt("LZMA2 is not the last filter")
+			return xerr.Unsupported("LZMA2 is not the last filter")
 		}
 	}
 	lp := specs[last].props
@@ -361,6 +369,7 @@ func (r *Reader) buildChain(specs []filterSpec) error {
 	if !ok {
 		return xerr.Corrupt("invalid LZMA2 dictionary size")
 	}
+	r.maxDeclared = max(r.maxDeclared, dict)
 	if r.l2 == nil {
 		r.l2 = lzmacore.NewLZMA2(r.src, dict, uint64(r.cfg.MaxDictionary))
 	} else {
