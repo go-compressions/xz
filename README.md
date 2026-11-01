@@ -202,11 +202,38 @@ Both packages re-export the same error variables. All readers are streaming
   amd64, arm64, windows and — through cross-compiled test binaries under QEMU —
   riscv64, ppc64le, s390x (big-endian) and loong64; plus 386 for 32-bit.
 
-FUZZ_RESULTS
+### Fuzzing results
+
+100 s per target, 3 workers, on an Apple silicon laptop (`GOMEMLIMIT=3GiB`):
+
+| target | executions | corpus after the run | crashers |
+|---|---|---|---|
+| `FuzzXZ` | 6.83 M | 232 | 0 |
+| `FuzzLZMA` | 3.76 M | 306 | 0 |
+| `FuzzLZMA2` | 5.96 M | 168 | 0 |
+
+The only disagreements the seeds produced are on the *oracle's* side:
+`ulikunitz/xz` v0.5.17 accepts at least two files that XZ Utils lists as `bad-`
+(one with a non-minimal variable-length integer, one with an LZMA2 chunk whose
+data exceeds its declared size) and this decoder refuses them, so the
+differential only demands equal bytes where both decoders succeed. A weekly
+workflow (`fuzz.yml`) keeps fuzzing; a crasher it finds is committed under
+`testdata/fuzz/` and written out as a named unit test.
 
 ## Performance
 
-BENCH_RESULTS
+`go run ./internal/benchxz -work <durable dir>` decodes a 64 MiB corpus (the Go
+source tree and toolchain binaries of the installed Go, compressed once with
+`xz -6 -T1`) with this library, with `ulikunitz/xz` v0.5.17 and with `xz -dc`
+(C), single core, in interleaved rounds, and prints MB/s and ratios. It refuses
+to run when the 1-minute load average is above 8, because the figure would
+measure the machine.
+
+**Measurement deferred.** The 1-minute load average of the development machine
+was 32 to 47 throughout this work (about 25 sessions share it), so the tool
+refused to measure (exit status 3) and no throughput figure is claimed here. The
+decode loop is the reference's straight port with no per-byte check besides the
+range decoder's input refill; optimisation, algorithm first, waits for the table.
 
 ## Layout
 
