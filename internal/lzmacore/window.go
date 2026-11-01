@@ -86,15 +86,6 @@ func (w *window) advance() error {
 	return nil
 }
 
-// prev returns the byte before pos (GetByte(1)); the caller has checked that
-// the window is not empty.
-func (w *window) prev() byte {
-	if w.pos > 0 {
-		return w.buf[w.pos-1]
-	}
-	return w.buf[len(w.buf)-1]
-}
-
 // at returns the byte dist positions back (GetByte(dist), dist >= 1).
 func (w *window) at(dist int) byte {
 	i := w.pos - dist

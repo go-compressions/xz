@@ -1,6 +1,8 @@
 package lzmacore
 
 import (
+	"cmp"
+
 	"github.com/go-compressions/xz/internal/xerr"
 )
 
@@ -210,7 +212,7 @@ func (d *Decoder) decodeLiteral() byte {
 	rc := &d.rc
 	var prev uint32
 	if !w.empty() {
-		prev = uint32(w.prev())
+		prev = uint32(w.at(1))
 	}
 	ls := (w.total&d.lpMask)<<d.lc + prev>>(8-d.lc)
 	if int(ls) >= d.litStates {
@@ -369,11 +371,8 @@ func (d *Decoder) decode(limit int) (status, error) {
 			d.state = updateMatch(d.state)
 			d.rep0 = d.decodeDistance(length)
 			if d.rep0 == markerDistance {
-				if rc.err != nil {
-					return d.fail(rc.err)
-				}
-				if !rc.finishedOK() {
-					return d.fail(xerr.Corrupt("end marker with trailing range coder state"))
+				if rc.err != nil || !rc.finishedOK() {
+					return d.fail(cmp.Or(rc.err, xerr.Corrupt("end marker with trailing range coder state")))
 				}
 				if d.noMarker || (d.known && d.unpack != 0) {
 					return d.fail(xerr.Corrupt("end marker before declared size"))

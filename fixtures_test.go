@@ -3,14 +3,14 @@ package xz_test
 import (
 	"bytes"
 	"io"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/go-compressions/xz"
 	"github.com/go-compressions/xz/internal/corpus"
+	"github.com/go-compressions/xz/internal/testfiles"
 	"github.com/go-compressions/xz/lzma"
 )
 
@@ -25,7 +25,7 @@ type fixture struct {
 // loadFixtures reads testdata/INDEX written by internal/mkfixtures.
 func loadFixtures(t testing.TB) []fixture {
 	t.Helper()
-	idx, err := os.ReadFile(filepath.Join("testdata", "INDEX"))
+	idx, err := fs.ReadFile(testfiles.FS, "INDEX")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func loadFixtures(t testing.TB) []fixture {
 
 func readFixture(t testing.TB, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("testdata", name))
+	b, err := fs.ReadFile(testfiles.FS, name)
 	if err != nil {
 		t.Fatal(err)
 	}

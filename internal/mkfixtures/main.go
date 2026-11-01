@@ -1,8 +1,8 @@
-// Command mkfixtures regenerates the .xz and .lzma files under testdata/
+// Command mkfixtures regenerates the .xz and .lzma files under internal/testfiles/data
 // with the xz command line tool (the C reference, xz-utils). The tests only
 // read the committed files; they never need xz installed.
 //
-//	go run ./internal/mkfixtures -out testdata
+//	go run ./internal/mkfixtures
 package main
 
 import (
@@ -69,7 +69,7 @@ func fixtures() []fixture {
 }
 
 func main() {
-	out := flag.String("out", "testdata", "output directory")
+	out := flag.String("out", "internal/testfiles/data", "output directory")
 	flag.Parse()
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
