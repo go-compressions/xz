@@ -1,4 +1,5 @@
-// Package lzma decodes the .lzma ("LZMA alone") format and raw LZMA2 streams.
+// Package lzma decodes the .lzma ("LZMA alone") format, raw LZMA2 streams and
+// headerless LZMA1 streams with an end marker (lzip members).
 //
 // The API mirrors the decode side of github.com/ulikunitz/xz/lzma. The
 // dictionary window is allocated lazily and never beyond MaxDictionary, so
@@ -116,6 +117,57 @@ func (r *Reader) Header() Header {
 
 // Read reads uncompressed data.
 func (r *Reader) Read(p []byte) (int, error) { return r.a.Read(p) }
+
+// Reader1Config holds the parameters of a headerless LZMA1 stream.
+type Reader1Config struct {
+	// LC, LP and PB are the literal context bits (0 to 8), literal position
+	// bits (0 to 4) and position bits (0 to 4) of the stream.
+	LC, LP, PB uint
+
+	// DictCap is the dictionary size declared by the container (for example
+	// the coded size in an lzip member header). Values below MinDictCap are
+	// raised to it. Memory follows the data, not this figure.
+	DictCap int
+
+	// MaxDictionary is the ceiling in bytes on the window that will be
+	// allocated; zero means DefaultMaxDictionary.
+	MaxDictionary int
+}
+
+// Reader1 decodes a headerless LZMA1 stream of unknown size that ends with an
+// end-of-stream marker, as found inside an lzip member.
+type Reader1 struct {
+	a *lzmacore.Alone
+}
+
+// NewReader1 creates a reader for a headerless LZMA1 stream. The stream ends at
+// its end marker (io.EOF); a source that ends first is ErrTruncated, reported
+// by Read.
+//
+// The decoder reads ahead from lzma1, so the bytes that follow the stream
+// (an lzip trailer, the next member) are in Unconsumed once Read reports
+// io.EOF.
+func (c Reader1Config) NewReader1(lzma1 io.Reader) (*Reader1, error) {
+	if c.LC > 8 || c.LP > 4 || c.PB > 4 {
+		return nil, errors.New("lzma: invalid lc, lp or pb")
+	}
+	if c.DictCap < 0 || int64(c.DictCap) > MaxDictCap {
+		return nil, errors.New("lzma: dictionary capacity is out of range")
+	}
+	m, err := ceiling(c.MaxDictionary)
+	if err != nil {
+		return nil, err
+	}
+	return &Reader1{lzmacore.NewRaw(lzma1, c.LC, c.LP, c.PB, uint32(c.DictCap), m)}, nil
+}
+
+// Read reads uncompressed data.
+func (r *Reader1) Read(p []byte) (int, error) { return r.a.Read(p) }
+
+// Unconsumed returns the bytes read from the source that the decoder did not
+// use: after io.EOF, the bytes that follow the stream. The slice is valid until
+// the next Read; copy it to keep it.
+func (r *Reader1) Unconsumed() []byte { return r.a.Unconsumed() }
 
 // Reader2Config holds the parameters of Reader2.
 type Reader2Config struct {

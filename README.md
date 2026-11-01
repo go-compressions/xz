@@ -163,7 +163,16 @@ func NewReader2(r io.Reader) (*Reader2, error)                  // raw LZMA2
 func (c Reader2Config) NewReader2(r io.Reader) (*Reader2, error)
 type Reader2Config struct { DictCap int; MaxDictionary int }    // DictCap: the container's dictionary size
 func DictCapFromProp(prop byte) (uint32, error)                  // the 7z / xz property byte
+func (c Reader1Config) NewReader1(r io.Reader) (*Reader1, error) // headerless LZMA1 with end marker (lzip)
+type Reader1Config struct { LC, LP, PB uint; DictCap, MaxDictionary int }
+func (r *Reader1) Unconsumed() []byte                            // read-ahead left over after io.EOF
 ```
+
+`Reader1` decodes the headerless LZMA1 coding inside an lzip member (lc, lp, pb
+and the dictionary come from the container, the size is unknown, an end marker
+ends the stream). The decoder reads ahead from its source, so the bytes that
+follow the stream (the lzip trailer, the next member) are returned by
+`Unconsumed` once `Read` has reported `io.EOF`; the caller pushes them back.
 
 Both packages re-export the same error variables. All readers are streaming
 `io.Reader`s. The `.xz` reader reads from the source exactly the bytes it uses
