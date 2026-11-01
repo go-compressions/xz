@@ -218,7 +218,12 @@ func mustReader2(t *testing.T, cfg lzma.Reader2Config, enc []byte) io.Reader {
 }
 
 func TestReader2Config(t *testing.T) {
-	for _, cfg := range []lzma.Reader2Config{{DictCap: -1}, {DictCap: 1 << 40}, {MaxDictionary: -5}} {
+	cfgs := []lzma.Reader2Config{{DictCap: -1}, {MaxDictionary: -5}}
+	// A dictionary above 4 GiB - 1 can only be written where int is 64 bits.
+	if shift := uint(40); 1<<shift > 0 {
+		cfgs = append(cfgs, lzma.Reader2Config{DictCap: 1 << shift})
+	}
+	for _, cfg := range cfgs {
 		if _, err := cfg.NewReader2(bytes.NewReader(nil)); err == nil {
 			t.Fatalf("%+v accepted", cfg)
 		}
