@@ -65,14 +65,38 @@ func NewAlone(src io.Reader, max uint64) (*Alone, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newAlone(src, h, max), nil
+}
+
+func newAlone(src io.Reader, h Header, max uint64) *Alone {
 	a := &Alone{h: h}
 	a.dec.win.reset(uint64(h.DecodeDictSize), max)
 	a.dec.SetProps(h.LC, h.LP, h.PB)
 	a.dec.ResetState()
 	a.dec.rc.src = src
 	a.dec.start(h.SizeKnown, h.Size, !h.SizeKnown, false)
-	return a, nil
+	return a
 }
+
+// NewRaw prepares decoding of a headerless LZMA stream of unknown size that
+// ends with an end marker (the coding inside an lzip member). The caller has
+// validated lc, lp and pb. dict is raised to MinDictSize as in the reference.
+func NewRaw(src io.Reader, lc, lp, pb uint, dict uint32, max uint64) *Alone {
+	h := Header{LC: lc, LP: lp, PB: pb, DictSize: dict, DecodeDictSize: max32(dict, MinDictSize)}
+	return newAlone(src, h, max)
+}
+
+func max32(a, b uint32) uint32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Unconsumed returns the bytes read from the source that the decoder did not
+// use. After the end marker has been reported as io.EOF they are the bytes that
+// follow the stream. The slice is valid until the next Read.
+func (a *Alone) Unconsumed() []byte { return a.dec.rc.in[a.dec.rc.pos:] }
 
 // Header returns the stream header.
 func (a *Alone) Header() Header { return a.h }
