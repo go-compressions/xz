@@ -148,10 +148,12 @@ func (rc *rangeDec) tree(probs []uint16, numBits uint) uint32 {
 }
 
 // treeFrom continues a bit tree from node m until m reaches top; the literal
-// coder resumes here after its matched bits.
+// coder resumes here after its matched bits. Slicing probs to top lets the
+// loop test bound the index, so it carries no bounds check.
 func (rc *rangeDec) treeFrom(probs []uint16, m, top uint32) uint32 {
 	rng, code, in, pos := rc.rng, rc.code, rc.in, rc.pos
-	for m < top {
+	probs = probs[:top]
+	for uint(m) < uint(len(probs)) {
 		p := &probs[m]
 		v := uint32(*p)
 		bound := (rng >> numBitModelTotalBits) * v
@@ -168,7 +170,7 @@ func (rc *rangeDec) treeFrom(probs []uint16, m, top uint32) uint32 {
 		if rng < topValue {
 			rng <<= 8
 			var b byte
-			if pos < len(in) {
+			if uint(pos) < uint(len(in)) {
 				b = in[pos]
 				pos++
 			} else {
@@ -204,7 +206,7 @@ func (rc *rangeDec) reverse(probs []uint16, numBits uint) uint32 {
 		if rng < topValue {
 			rng <<= 8
 			var b byte
-			if pos < len(in) {
+			if uint(pos) < uint(len(in)) {
 				b = in[pos]
 				pos++
 			} else {
@@ -242,7 +244,7 @@ func (rc *rangeDec) matchedLiteral(probs []uint16, matchByte uint32) uint32 {
 		if rng < topValue {
 			rng <<= 8
 			var b byte
-			if pos < len(in) {
+			if uint(pos) < uint(len(in)) {
 				b = in[pos]
 				pos++
 			} else {
