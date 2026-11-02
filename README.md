@@ -238,24 +238,30 @@ source tree and toolchain binaries of the installed Go, compressed once with
 to run when the 1-minute load average is above 8, because the figure would
 measure the machine.
 
-Measured on 2026-11-01 on an Apple M4 Max, single core, at a 1-minute load of
-5.0 to 6.0 (below the tool's limit of 8), 5 interleaved rounds over the 64 MiB
+Measured on 2026-11-02 on an Apple M4 Max, single core, at a 1-minute load of
+5.5 to 5.9 (below the tool's limit of 8), 5 interleaved rounds over the 64 MiB
 corpus, which `xz -6` compresses to 11,232,400 bytes:
 
 | decoder | best MB/s | median MB/s |
 |---|---|---|
-| go-compressions/xz | 87.5 | 86.2 |
-| ulikunitz/xz v0.5.17 | 74.7 | 73.2 |
-| xz -dc (C) | 164.7 | 163.1 |
+| go-compressions/xz | 114.5 | 114.4 |
+| ulikunitz/xz v0.5.17 | 76.1 | 75.2 |
+| xz -dc (C) | 169.0 | 167.4 |
 
-Ratios of the best round: this library / ulikunitz/xz = 1.17, this library /
-`xz -dc` = 0.53.
+Ratios of the best round: this library / ulikunitz/xz = 1.50, this library /
+`xz -dc` = 0.68.
 
-It is faster than `ulikunitz/xz`, but at 0.53 of the C reference it is slower
-than the domain's reference tool, which under the fleet's performance rule is an
-**open performance defect**. It is not fixed here: the decode loop is the
-reference decoder's straight port with no per-byte check besides the range
-decoder's input refill, and optimisation (algorithm first) is the next step.
+v0.3.0 holds the range decoder's state in locals across bit trees, reverse
+trees and matched literals, the way liblzma's `rc_bit` macros do; Go does not
+inline the per-bit function, which the profile showed taking 59% of decode time.
+Against v0.2.0 (`BenchmarkDecodeCorpus`, `abbench`, GOMAXPROCS=1, 8 rounds) that
+is 22.7% less time per decode (p=0.000). The measurement before it, on
+2026-11-01, was 87.5 MB/s, 1.17 × `ulikunitz/xz` and 0.53 × `xz -dc`.
+
+At 0.68 of the C reference it is still slower than the domain's reference tool,
+which under the fleet's performance rule is an **open performance defect**. The
+remaining profile points at the single-bit decodes of the main loop, match
+copies into the window and CRC64.
 
 ## Layout
 
