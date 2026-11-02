@@ -221,21 +221,9 @@ func (d *Decoder) decodeLiteral() byte {
 	probs := d.litProbs[litBlock*ls : litBlock*ls+litBlock]
 	sym := uint32(1)
 	if d.state >= 7 {
-		matchByte := uint32(w.at(int(d.rep0) + 1))
-		for {
-			matchBit := (matchByte >> 7) & 1
-			matchByte <<= 1
-			bit := rc.bit(&probs[(1+matchBit)<<8+sym])
-			sym = sym<<1 | bit
-			if matchBit != bit || sym >= 0x100 {
-				break
-			}
-		}
+		sym = rc.matchedLiteral(probs, uint32(w.at(int(d.rep0)+1)))
 	}
-	for sym < 0x100 {
-		sym = sym<<1 | rc.bit(&probs[sym])
-	}
-	return byte(sym - 0x100)
+	return byte(rc.treeFrom(probs, sym, 0x100) - 0x100)
 }
 
 // decodeDistance is CLzmaDecoder::DecodeDistance.
