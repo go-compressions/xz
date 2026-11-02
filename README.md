@@ -238,18 +238,31 @@ source tree and toolchain binaries of the installed Go, compressed once with
 to run when the 1-minute load average is above 8, because the figure would
 measure the machine.
 
-Measured on 2026-11-02 on an Apple M4 Max, single core, at a 1-minute load of
-5.5 to 5.9 (below the tool's limit of 8), 5 interleaved rounds over the 64 MiB
-corpus, which `xz -6` compresses to 11,232,400 bytes:
+Measured on 2026-11-02 (v0.3.1) on an Apple M4 Max, single core, at a 1-minute
+load of 5.6 to 5.8 (below the tool's limit of 8), 5 interleaved rounds over the
+64 MiB corpus, which `xz -6` compresses to 11,232,400 bytes:
 
 | decoder | best MB/s | median MB/s |
 |---|---|---|
-| go-compressions/xz | 114.5 | 114.4 |
-| ulikunitz/xz v0.5.17 | 76.1 | 75.2 |
-| xz -dc (C) | 169.0 | 167.4 |
+| go-compressions/xz | 110.9 | 107.9 |
+| ulikunitz/xz v0.5.17 | 69.1 | 68.8 |
+| xz -dc (C) | 145.0 | 144.0 |
 
-Ratios of the best round: this library / ulikunitz/xz = 1.50, this library /
-`xz -dc` = 0.68.
+Ratios of the best round: this library / ulikunitz/xz = 1.60, this library /
+`xz -dc` = 0.76.
+
+The host ran all three decoders slower in this run than in the v0.3.0 one
+(`xz -dc` 169.0 MB/s then), so compare the ratios, which come from the same
+interleaved rounds, not MB/s across runs.
+
+v0.3.1 decodes bit trees and matched literals branchless (liblzma's
+`rc_c_bit`) and loads both candidates for the next probability before the bit
+is known, letting the bit's mask pick one: the load leaves the per-bit
+dependency chain. Against v0.3.0 (`abbench`, GOMAXPROCS=1, 8 rounds) that is
+−3.5% (bit trees, p=0.000) then −2.8% (matched literals, p=0.002). Branchless
+alone, without the preload, measured no change (p=0.195), as liblzma's header
+predicts outside x86-64. v0.3.0 measured 1.50 × `ulikunitz/xz` and 0.68 ×
+`xz -dc`.
 
 v0.3.0 holds the range decoder's state in locals across bit trees, reverse
 trees and matched literals, the way liblzma's `rc_bit` macros do; Go does not
@@ -258,10 +271,11 @@ Against v0.2.0 (`BenchmarkDecodeCorpus`, `abbench`, GOMAXPROCS=1, 8 rounds) that
 is 22.7% less time per decode (p=0.000). The measurement before it, on
 2026-11-01, was 87.5 MB/s, 1.17 × `ulikunitz/xz` and 0.53 × `xz -dc`.
 
-At 0.68 of the C reference it is still slower than the domain's reference tool,
+At 0.76 of the C reference it is still slower than the domain's reference tool,
 which under the fleet's performance rule is an **open performance defect**. The
 remaining profile points at the single-bit decodes of the main loop, match
-copies into the window and CRC64.
+copies into the window and CRC64; an arm64 range-decoder kernel, generated with
+go-asmgen and checked against this pure-Go decoder, is the next step.
 
 ## Layout
 
