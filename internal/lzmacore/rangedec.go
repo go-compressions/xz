@@ -242,21 +242,28 @@ func (rc *rangeDec) reverse(probs []uint16, numBits uint) uint32 {
 func (rc *rangeDec) matchedLiteral(probs []uint16, matchByte uint32) uint32 {
 	rng, code, in, pos := rc.rng, rc.code, rc.in, rc.pos
 	sym := uint32(1)
+	matchBit := (matchByte >> 7) & 1
+	i := (1+matchBit)<<8 + sym
+	v := uint32(probs[i])
 	for {
-		matchBit := (matchByte >> 7) & 1
-		matchByte <<= 1
-		p := &probs[(1+matchBit)<<8+sym]
-		v := uint32(*p)
 		bound := (rng >> numBitModelTotalBits) * v
-		var bit uint32
-		if code < bound {
-			*p = uint16(v + ((1<<numBitModelTotalBits)-v)>>numMoveBits)
-			rng = bound
-		} else {
-			*p = uint16(v - v>>numMoveBits)
-			code -= bound
-			rng -= bound
-			bit = 1
+		// As in treeFrom: rc_c_bit, and the next probability is chosen
+		// from the two candidates by the bit's mask, not loaded after it.
+		bit := uint32((uint64(code)-uint64(bound))>>63) ^ 1
+		mask := 0 - bit
+		rng &= mask
+		bound ^= mask
+		bound -= mask
+		rng += bound
+		code += bound & mask
+		probs[i] = uint16(v - (v+(^mask&bitModelOffset))>>numMoveBits)
+		if sym < 0x80 {
+			matchByte <<= 1
+			next := (matchByte >> 7) & 1
+			i = (1+next)<<8 + sym<<1
+			v0, v1 := uint32(probs[i]), uint32(probs[i+1])
+			v = v0 ^ (v0^v1)&mask
+			i += bit
 		}
 		if rng < topValue {
 			rng <<= 8
@@ -273,6 +280,7 @@ func (rc *rangeDec) matchedLiteral(probs []uint16, matchByte uint32) uint32 {
 		if matchBit != bit || sym >= 0x100 {
 			break
 		}
+		matchBit = (matchByte >> 7) & 1
 	}
 	rc.rng, rc.code, rc.in, rc.pos = rng, code, in, pos
 	return sym
