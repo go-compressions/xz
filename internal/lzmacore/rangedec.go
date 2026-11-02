@@ -128,24 +128,134 @@ func (rc *rangeDec) bit(p *uint16) uint32 {
 	return s
 }
 
+// The loops below decode many bits per call, so they are bit written out by
+// hand with rng, code, in and pos held in locals, the way liblzma's rc_bit
+// macros work. Go does not inline bit (cost 124, budget 80), and through the
+// pointer every bit loads and stores the coder state. Each loop is the
+// reference bit, step for step; only where the state lives changes.
+
+// refillAt is next for the loops that hold the position in a local: it
+// refills at pos and hands back the new input and position.
+func (rc *rangeDec) refillAt(pos int) (byte, []byte, int) {
+	rc.pos = pos
+	b := rc.refill()
+	return b, rc.in, rc.pos
+}
+
 // tree is CBitTreeDecoder::Decode.
 func (rc *rangeDec) tree(probs []uint16, numBits uint) uint32 {
-	m := uint32(1)
-	for i := uint(0); i < numBits; i++ {
-		m = m<<1 + rc.bit(&probs[m])
+	return rc.treeFrom(probs, 1, 1<<numBits) - 1<<numBits
+}
+
+// treeFrom continues a bit tree from node m until m reaches top; the literal
+// coder resumes here after its matched bits.
+func (rc *rangeDec) treeFrom(probs []uint16, m, top uint32) uint32 {
+	rng, code, in, pos := rc.rng, rc.code, rc.in, rc.pos
+	for m < top {
+		p := &probs[m]
+		v := uint32(*p)
+		bound := (rng >> numBitModelTotalBits) * v
+		if code < bound {
+			*p = uint16(v + ((1<<numBitModelTotalBits)-v)>>numMoveBits)
+			rng = bound
+			m <<= 1
+		} else {
+			*p = uint16(v - v>>numMoveBits)
+			code -= bound
+			rng -= bound
+			m = m<<1 + 1
+		}
+		if rng < topValue {
+			rng <<= 8
+			var b byte
+			if pos < len(in) {
+				b = in[pos]
+				pos++
+			} else {
+				b, in, pos = rc.refillAt(pos)
+			}
+			code = code<<8 | uint32(b)
+		}
 	}
-	return m - 1<<numBits
+	rc.rng, rc.code, rc.in, rc.pos = rng, code, in, pos
+	return m
 }
 
 // reverse is BitTreeReverseDecode.
 func (rc *rangeDec) reverse(probs []uint16, numBits uint) uint32 {
+	rng, code, in, pos := rc.rng, rc.code, rc.in, rc.pos
 	m := uint32(1)
 	var sym uint32
 	for i := uint(0); i < numBits; i++ {
-		b := rc.bit(&probs[m])
-		m = m<<1 + b
-		sym |= b << i
+		p := &probs[m]
+		v := uint32(*p)
+		bound := (rng >> numBitModelTotalBits) * v
+		if code < bound {
+			*p = uint16(v + ((1<<numBitModelTotalBits)-v)>>numMoveBits)
+			rng = bound
+			m <<= 1
+		} else {
+			*p = uint16(v - v>>numMoveBits)
+			code -= bound
+			rng -= bound
+			m = m<<1 + 1
+			sym |= 1 << i
+		}
+		if rng < topValue {
+			rng <<= 8
+			var b byte
+			if pos < len(in) {
+				b = in[pos]
+				pos++
+			} else {
+				b, in, pos = rc.refillAt(pos)
+			}
+			code = code<<8 | uint32(b)
+		}
 	}
+	rc.rng, rc.code, rc.in, rc.pos = rng, code, in, pos
+	return sym
+}
+
+// matchedLiteral is the first loop of CLzmaDecoder::DecodeLiteral after a
+// match: bits are decoded with the match byte's bit as context until one
+// differs. It returns the partial symbol for treeFrom to finish.
+func (rc *rangeDec) matchedLiteral(probs []uint16, matchByte uint32) uint32 {
+	rng, code, in, pos := rc.rng, rc.code, rc.in, rc.pos
+	sym := uint32(1)
+	for {
+		matchBit := (matchByte >> 7) & 1
+		matchByte <<= 1
+		p := &probs[(1+matchBit)<<8+sym]
+		v := uint32(*p)
+		bound := (rng >> numBitModelTotalBits) * v
+		var bit uint32
+		if code < bound {
+			*p = uint16(v + ((1<<numBitModelTotalBits)-v)>>numMoveBits)
+			rng = bound
+		} else {
+			*p = uint16(v - v>>numMoveBits)
+			code -= bound
+			rng -= bound
+			bit = 1
+		}
+		if rng < topValue {
+			rng <<= 8
+			var b byte
+			if pos < len(in) {
+				b = in[pos]
+				pos++
+			} else {
+				b, in, pos = rc.refillAt(pos)
+			}
+			code = code<<8 | uint32(b)
+		}
+		sym = sym<<1 | bit
+		if matchBit != bit || sym >= 0x100 {
+			break
+		}
+	}
+	rc.rng, rc.code, rc.in, rc.pos = rng, code, in, pos
 	return sym
 }
 
