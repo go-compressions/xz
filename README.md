@@ -238,11 +238,24 @@ source tree and toolchain binaries of the installed Go, compressed once with
 to run when the 1-minute load average is above 8, because the figure would
 measure the machine.
 
-**Measurement deferred.** The 1-minute load average of the development machine
-was 32 to 47 throughout this work (about 25 sessions share it), so the tool
-refused to measure (exit status 3) and no throughput figure is claimed here. The
-decode loop is the reference's straight port with no per-byte check besides the
-range decoder's input refill; optimisation, algorithm first, waits for the table.
+Measured on 2026-11-01 on an Apple M4 Max, single core, at a 1-minute load of
+5.0 to 6.0 (below the tool's limit of 8), 5 interleaved rounds over the 64 MiB
+corpus, which `xz -6` compresses to 11,232,400 bytes:
+
+| decoder | best MB/s | median MB/s |
+|---|---|---|
+| go-compressions/xz | 87.5 | 86.2 |
+| ulikunitz/xz v0.5.17 | 74.7 | 73.2 |
+| xz -dc (C) | 164.7 | 163.1 |
+
+Ratios of the best round: this library / ulikunitz/xz = 1.17, this library /
+`xz -dc` = 0.53.
+
+It is faster than `ulikunitz/xz`, but at 0.53 of the C reference it is slower
+than the domain's reference tool, which under the fleet's performance rule is an
+**open performance defect**. It is not fixed here: the decode loop is the
+reference decoder's straight port with no per-byte check besides the range
+decoder's input refill, and optimisation (algorithm first) is the next step.
 
 ## Layout
 
