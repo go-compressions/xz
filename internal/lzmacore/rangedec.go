@@ -12,6 +12,10 @@ const (
 	probInit             = (1 << numBitModelTotalBits) / 2
 	topValue             = 1 << 24
 	inputBuffer          = 32 << 10
+
+	// bitModelOffset is liblzma's RC_BIT_MODEL_OFFSET, wrapped to uint32:
+	// v - (v+offset)>>numMoveBits, kept to 16 bits, is the bit-0 update.
+	bitModelOffset = uint32(1<<32 + 1<<numMoveBits - 1 - 1<<numBitModelTotalBits)
 )
 
 // rangeDec is the reference CRangeDecoder. Input comes from in[pos:]; when
@@ -153,19 +157,29 @@ func (rc *rangeDec) tree(probs []uint16, numBits uint) uint32 {
 func (rc *rangeDec) treeFrom(probs []uint16, m, top uint32) uint32 {
 	rng, code, in, pos := rc.rng, rc.code, rc.in, rc.pos
 	probs = probs[:top]
-	for uint(m) < uint(len(probs)) {
-		p := &probs[m]
-		v := uint32(*p)
+	if m >= top {
+		return m
+	}
+	v := uint32(probs[m])
+	for {
 		bound := (rng >> numBitModelTotalBits) * v
-		if code < bound {
-			*p = uint16(v + ((1<<numBitModelTotalBits)-v)>>numMoveBits)
-			rng = bound
-			m <<= 1
-		} else {
-			*p = uint16(v - v>>numMoveBits)
-			code -= bound
-			rng -= bound
-			m = m<<1 + 1
+		// liblzma's rc_c_bit: the bit becomes a mask instead of a branch.
+		bit := uint32((uint64(code)-uint64(bound))>>63) ^ 1
+		mask := 0 - bit
+		rng &= mask
+		bound ^= mask
+		bound -= mask
+		rng += bound
+		code += bound & mask
+		probs[m] = uint16(v - (v+(^mask&bitModelOffset))>>numMoveBits)
+		n := m << 1
+		m = n + bit
+		last := n >= top
+		if !last {
+			// Both children are loaded before the bit is known and the mask
+			// picks one, so the next probability is off the critical path.
+			v0, v1 := uint32(probs[n]), uint32(probs[n+1])
+			v = v0 ^ (v0^v1)&mask
 		}
 		if rng < topValue {
 			rng <<= 8
@@ -177,6 +191,9 @@ func (rc *rangeDec) treeFrom(probs []uint16, m, top uint32) uint32 {
 				b, in, pos = rc.refillAt(pos)
 			}
 			code = code<<8 | uint32(b)
+		}
+		if last {
+			break
 		}
 	}
 	rc.rng, rc.code, rc.in, rc.pos = rng, code, in, pos
