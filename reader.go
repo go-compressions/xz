@@ -15,8 +15,9 @@ import (
 	"errors"
 	"hash"
 	"hash/crc32"
-	"hash/crc64"
 	"io"
+
+	"github.com/go-simd/crc64"
 
 	"github.com/go-compressions/xz/internal/filter"
 	"github.com/go-compressions/xz/internal/lzmacore"
